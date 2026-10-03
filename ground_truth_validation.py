@@ -29,7 +29,7 @@ from angle_calculator import joint_angle
 
 DATA_ROOT = Path("/kaggle/input/datasets/mohamedkhapiry/rehab24-6")
 SEGMENTATION_CSV = DATA_ROOT / "Segmentation.csv"
-JOINTS_3D_DIR = DATA_ROOT / "3d_joints"  # VERIFY: adjust if the real folder name differs
+JOINTS_3D_DIR = DATA_ROOT / "3d_markers"  # VERIFY: adjust if the real folder name differs
 
 # 26-joint BVH-style skeleton, index order per joints_names.txt
 JOINT_NAMES = [
@@ -124,7 +124,7 @@ def summarize(df: pd.DataFrame, angle_col: str, target_low: float, target_high: 
 
 
 if __name__ == "__main__":
-    seg = pd.read_csv(SEGMENTATION_CSV)
+    seg = pd.read_csv(SEGMENTATION_CSV, sep=";")
 
     print("=" * 60)
     print("SQUAT (Ex6) — knee 70-100 deg target, hip 60-120 deg target")
