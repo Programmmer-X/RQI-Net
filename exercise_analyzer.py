@@ -24,7 +24,7 @@ Scores are 0-1 so rqi.py can apply the spec's weighted sums directly
 
 from dataclasses import dataclass
 from statistics import pstdev
-from typing import Sequence
+from typing import Optional, Sequence
 
 from angle_calculator import joint_angle, landmark_xy
 from pose_estimator import FrameLandmarks
@@ -66,28 +66,40 @@ class ArmAbductionMetrics:
     mean_elbow_angle: float
 
 
+def _best_visible_side(frames: Sequence[FrameLandmarks], joint_prefix: str) -> str:
+    """
+    REHAB24-6 doesn't label a side for squat (it's bilateral), so pick
+    whichever side MediaPipe tracked more confidently across the rep.
+    """
+    left_vis = _mean([f.points[f"left_{joint_prefix}"][3] for f in frames])
+    right_vis = _mean([f.points[f"right_{joint_prefix}"][3] for f in frames])
+    return "left" if left_vis >= right_vis else "right"
+
+
 def analyze_squat(frames: Sequence[FrameLandmarks]) -> SquatMetrics:
     if not frames:
         raise ValueError("No frames provided for squat analysis.")
+
+    side = _best_visible_side(frames, "knee")
 
     knee_angles = []
     hip_angles = []
     for f in frames:
         p = f.points
-        # Knee angle: hip-knee-ankle. Use whichever side has better visibility.
+        # Knee angle: hip-knee-ankle.
         knee_angles.append(
             joint_angle(
-                landmark_xy_from(p, "left_hip"),
-                landmark_xy_from(p, "left_knee"),
-                landmark_xy_from(p, "left_ankle"),
+                landmark_xy_from(p, f"{side}_hip"),
+                landmark_xy_from(p, f"{side}_knee"),
+                landmark_xy_from(p, f"{side}_ankle"),
             )
         )
         # Hip angle: shoulder-hip-knee.
         hip_angles.append(
             joint_angle(
-                landmark_xy_from(p, "left_shoulder"),
-                landmark_xy_from(p, "left_hip"),
-                landmark_xy_from(p, "left_knee"),
+                landmark_xy_from(p, f"{side}_shoulder"),
+                landmark_xy_from(p, f"{side}_hip"),
+                landmark_xy_from(p, f"{side}_knee"),
             )
         )
 
@@ -110,9 +122,23 @@ def analyze_squat(frames: Sequence[FrameLandmarks]) -> SquatMetrics:
     )
 
 
-def analyze_arm_abduction(frames: Sequence[FrameLandmarks]) -> ArmAbductionMetrics:
+def analyze_arm_abduction(
+    frames: Sequence[FrameLandmarks], side: Optional[str] = None
+) -> ArmAbductionMetrics:
+    """
+    side: "left" or "right". REHAB24-6 reps are single-arm — pass the
+    side from Segmentation.csv's `exercise_subtype` column
+    ("left arm" / "right arm"). If not given, falls back to whichever
+    side MediaPipe tracked more confidently (useful for non-REHAB24-6
+    footage where the side isn't known in advance).
+    """
     if not frames:
         raise ValueError("No frames provided for arm abduction analysis.")
+
+    if side is None:
+        side = _best_visible_side(frames, "wrist")
+    elif side not in ("left", "right"):
+        raise ValueError(f"side must be 'left' or 'right', got {side!r}")
 
     elevation_angles = []
     elbow_angles = []
@@ -122,17 +148,17 @@ def analyze_arm_abduction(frames: Sequence[FrameLandmarks]) -> ArmAbductionMetri
         # from the torso line).
         elevation_angles.append(
             joint_angle(
-                landmark_xy_from(p, "left_hip"),
-                landmark_xy_from(p, "left_shoulder"),
-                landmark_xy_from(p, "left_wrist"),
+                landmark_xy_from(p, f"{side}_hip"),
+                landmark_xy_from(p, f"{side}_shoulder"),
+                landmark_xy_from(p, f"{side}_wrist"),
             )
         )
         # Elbow angle: shoulder-elbow-wrist (straightness).
         elbow_angles.append(
             joint_angle(
-                landmark_xy_from(p, "left_shoulder"),
-                landmark_xy_from(p, "left_elbow"),
-                landmark_xy_from(p, "left_wrist"),
+                landmark_xy_from(p, f"{side}_shoulder"),
+                landmark_xy_from(p, f"{side}_elbow"),
+                landmark_xy_from(p, f"{side}_wrist"),
             )
         )
 

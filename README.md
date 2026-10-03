@@ -55,3 +55,49 @@ of Arm Flexion (forward arm raise) exists in the dataset.
 **Decision: scope narrowed to 2 exercises — Squat + Arm Abduction.** Arm
 Flexion dropped. `exercise_analyzer.py`, `rqi.py`, and `feedback.py` are
 built against this 2-exercise scope from here on.
+
+## Segmentation.csv — confirmed schema (Day 2)
+
+Semicolon-delimited (`sep=";"`, not the pandas default comma):
+
+```
+video_id;repetition_number;exercise_id;person_id;first_frame;last_frame;
+cam17_orientation;mocap_erroneous;exercise_subtype;lights_on;
+extra_person_in_cam17;extra_person_in_cam18;correctness
+```
+
+1072 rows. `exercise_id` 1 = Arm Abduction, 6 = Squat (matches the `Ex1`/
+`Ex6` video folders). `exercise_subtype` for arm abduction is `"left arm"`
+/ `"right arm"` — **reps are single-arm, not bilateral** — so
+`exercise_analyzer.analyze_arm_abduction()` now takes a `side` param.
+Squat has no side label (bilateral), so `analyze_squat()` auto-picks
+whichever side MediaPipe tracked with higher landmark visibility.
+
+`mocap_erroneous` and `extra_person_in_cam17/18` are quality flags —
+`dataset_loader.py` drops erroneous-mocap rows by default.
+
+**Unverified, worth checking before trusting results at scale**: some
+subjects' mocap `.npy` files are 120fps, others 30fps, but all videos
+seen so far are 30fps. If `first_frame`/`last_frame` were authored
+against 120fps mocap for some subjects, slicing the 30fps video with
+those numbers would be off by ~4x for that subject. Sanity-check one
+rep's `last_frame` against the video's actual frame count
+(`cv2.CAP_PROP_FRAME_COUNT`) before running the full extraction.
+
+## New modules (Day 2)
+
+- `dataset_loader.py` — parses `Segmentation.csv`, filters to the
+  2-exercise scope, drops erroneous-mocap reps, resolves each rep to its
+  video path + frame range + (for arm abduction) which side.
+- `pose_estimator.extract_frame_range_landmarks()` — pulls just one
+  repetition's frames out of an untrimmed video via `first_frame`/
+  `last_frame`; `rotate_90=True` for the Camera18 "-transposed" files.
+- `run_extraction.py` — runs the full pipeline (loader → pose extraction
+  → `exercise_analyzer`) over every rep, writes `results/rep_metrics.csv`
+  with computed scores next to the ground-truth `correctness` label.
+  Resumable (skips rows already in the output file on re-run). Only
+  tested against a synthetic CSV matching the real schema + missing
+  video files so far (confirms the logic and error-handling don't
+  crash) — **not yet run against real REHAB24-6 video.** Run with
+  `--limit 20` first on Kaggle to confirm it works end-to-end before
+  the full ~300+ rep run.

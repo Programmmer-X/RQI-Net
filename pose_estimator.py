@@ -103,6 +103,77 @@ def extract_video_landmarks(
     return results_out
 
 
+def extract_frame_range_landmarks(
+    video_path: str,
+    first_frame: int,
+    last_frame: int,
+    model_complexity: int = 1,
+    min_detection_confidence: float = 0.5,
+    min_tracking_confidence: float = 0.5,
+    rotate_90: bool = False,
+) -> list[FrameLandmarks]:
+    """
+    Like extract_video_landmarks, but only processes frames in
+    [first_frame, last_frame] (inclusive) — for pulling a single
+    repetition out of an untrimmed video using REHAB24-6's
+    Segmentation.csv frame boundaries.
+
+    rotate_90: set True for the "-transposed" camera files, which are
+    captured rotated 90 degrees. Rotates each frame clockwise before
+    running pose detection.
+    """
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise FileNotFoundError(f"Could not open video: {video_path}")
+
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+
+    # Seeking by frame index on mp4 can land a few frames off depending
+    # on keyframe spacing, so just read-and-skip up to first_frame
+    # rather than trusting CAP_PROP_POS_FRAMES for exact placement.
+    results_out: list[FrameLandmarks] = []
+
+    with mp_pose.Pose(
+        static_image_mode=False,
+        model_complexity=model_complexity,
+        min_detection_confidence=min_detection_confidence,
+        min_tracking_confidence=min_tracking_confidence,
+    ) as pose:
+        frame_index = 0
+        while True:
+            ok, frame_bgr = cap.read()
+            if not ok or frame_index > last_frame:
+                break
+            if frame_index < first_frame:
+                frame_index += 1
+                continue
+
+            if rotate_90:
+                frame_bgr = cv2.rotate(frame_bgr, cv2.ROTATE_90_CLOCKWISE)
+
+            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+            frame_rgb.flags.writeable = False
+            result = pose.process(frame_rgb)
+
+            if result.pose_landmarks is not None:
+                lm = result.pose_landmarks.landmark
+                points = {
+                    name: (lm[idx].x, lm[idx].y, lm[idx].z, lm[idx].visibility)
+                    for name, idx in LANDMARKS_OF_INTEREST.items()
+                }
+                results_out.append(
+                    FrameLandmarks(
+                        frame_index=frame_index,
+                        timestamp_sec=frame_index / fps,
+                        points=points,
+                    )
+                )
+            frame_index += 1
+
+    cap.release()
+    return results_out
+
+
 if __name__ == "__main__":
     import sys
 
