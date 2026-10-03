@@ -3,7 +3,7 @@
 ## Environment (verified working, pinned)
 
 ```
-mediapipe==0.10.33
+mediapipe==0.10.21
 numpy<2
 pandas
 matplotlib
