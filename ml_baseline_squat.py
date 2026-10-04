@@ -51,6 +51,7 @@ def main():
 
     models = {
         "logistic_regression": LogisticRegression(max_iter=1000),
+        
         "random_forest": RandomForestClassifier(n_estimators=200, max_depth=4, random_state=42),
     }
     # X is RAW here — evaluate_model scales internally, per fold, no leakage.

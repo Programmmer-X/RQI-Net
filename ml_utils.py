@@ -2,13 +2,38 @@
 ml_utils.py — shared by ml_baseline_arm_abduction.py and ml_baseline_squat.py.
 """
 from sklearn.model_selection import GroupKFold, cross_val_predict
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
 
 
 def evaluate_model(name, model, X, y, groups, n_splits):
+
     gkf = GroupKFold(n_splits=n_splits)
-    y_pred = cross_val_predict(model, X, y, cv=gkf, groups=groups, method="predict")
-    y_proba = cross_val_predict(model, X, y, cv=gkf, groups=groups, method="predict_proba")[:, 1]
+
+    pipe = Pipeline([
+        ("scaler", StandardScaler()),
+        ("model", model)
+    ])
+
+    y_pred = cross_val_predict(
+        pipe,
+        X,
+        y,
+        cv=gkf,
+        groups=groups,
+        method="predict"
+    )
+
+    y_proba = cross_val_predict(
+        pipe,
+        X,
+        y,
+        cv=gkf,
+        groups=groups,
+        method="predict_proba"
+    )[:, 1]
+
     return {
         "model": name,
         "accuracy": accuracy_score(y, y_pred),
