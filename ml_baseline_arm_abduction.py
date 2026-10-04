@@ -24,28 +24,13 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import GroupKFold, cross_val_predict
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.preprocessing import StandardScaler
 
 sys.path.insert(0, str(Path(__file__).parent))
 from ground_truth_validation import SEGMENTATION_CSV, analyze_arm_abduction_final, read_segmentation
+from ml_utils import evaluate_model
 
 FEATURE_COLS = ["peak_elevation", "peak_elbow", "max_trunk_lean", "mean_trunk_lean", "elevation_rom"]
-
-
-def evaluate_model(name, model, X, y, groups, n_splits):
-    gkf = GroupKFold(n_splits=n_splits)
-    y_pred = cross_val_predict(model, X, y, cv=gkf, groups=groups, method="predict")
-    y_proba = cross_val_predict(model, X, y, cv=gkf, groups=groups, method="predict_proba")[:, 1]
-    return {
-        "model": name,
-        "accuracy": accuracy_score(y, y_pred),
-        "precision": precision_score(y, y_pred),
-        "recall": recall_score(y, y_pred),
-        "f1": f1_score(y, y_pred),
-        "roc_auc": roc_auc_score(y, y_proba),
-    }
 
 
 def main():
