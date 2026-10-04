@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from ground_truth_validation import SEGMENTATION_CSV, analyze_squat, read_segmentation
 from ml_utils import evaluate_model
 
-FEATURE_COLS = ["peak_knee", "peak_hip"]
+FEATURE_COLS = ["peak_knee", "peak_hip", "trunk_lean_at_peak", "valgus_at_peak", "max_trunk_lean"]
 
 
 def main():
@@ -53,13 +53,13 @@ def main():
         "random_forest": RandomForestClassifier(n_estimators=200, max_depth=4, random_state=42),
     }
     results = [evaluate_model(name, model, X_scaled, y, groups, n_splits) for name, model in models.items()]
-    results_df = pd.DataFrame(results).sort_values("f1", ascending=False).reset_index(drop=True)
+    results_df = pd.DataFrame(results).sort_values("roc_auc", ascending=False).reset_index(drop=True)
 
     print("=" * 72)
     print("CROSS-VALIDATED COMPARISON (out-of-fold, grouped by subject)")
     print("=" * 72)
     print(results_df.to_string(index=False, float_format=lambda v: f"{v:.3f}"))
-    print(f"\nWinner (by F1): {results_df.iloc[0]['model']}")
+    print(f"\nWinner (by ROC-AUC — F1 is unreliable here under 68/32 class imbalance): {results_df.iloc[0]['model']}")
 
     print("\n" + "=" * 72)
     print("INTERPRETABILITY (fit on full data, not the CV estimate)")

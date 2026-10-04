@@ -82,6 +82,13 @@ def squat_angles(p):
     hip = joint_angle(p["shoulder_center"], p["hip_right"], p["knee_right"])
     return knee, hip
 
+def squat_valgus_angle(p):
+    """
+    Frontal-plane (x,y only, z/depth dropped) angle at the knee between
+    hip and ankle. ~180 deg = knee tracks straight between hip and ankle
+    (no valgus); smaller = knee caving inward (valgus).
+    """
+    return joint_angle(p["hip_right"][:2], p["knee_right"][:2], p["ankle_right"][:2])
 
 def elevation_angle(p):
     """pelvis_ref — frozen as the baseline definition. No further elevation experiments."""
@@ -120,12 +127,25 @@ def analyze_squat(seg):
         if first >= last:
             continue
         segment = arr[first:last + 1]
-        series = np.array([squat_angles(get_virtual_points(source_type, segment[t])) for t in range(segment.shape[0])])
-        peak_idx = series[:, 0].argmin()
+        knee_hip_series, trunk_lean_series, valgus_series = [], [], []
+        for t in range(segment.shape[0]):
+            pts = get_virtual_points(source_type, segment[t])
+            knee_hip_series.append(squat_angles(pts))
+            trunk_lean_series.append(trunk_lean_angle(pts))
+            valgus_series.append(squat_valgus_angle(pts))
+        knee_hip_series = np.array(knee_hip_series)
+        trunk_lean_series = np.array(trunk_lean_series)
+        valgus_series = np.array(valgus_series)
+        peak_idx = knee_hip_series[:, 0].argmin()  # deepest knee bend — shared reference frame
         records.append({
             "video_id": row["video_id"], "correctness": int(row["correctness"]),
-            "peak_knee": series[peak_idx, 0], "peak_hip": series[peak_idx, 1],
+            "peak_knee": knee_hip_series[peak_idx, 0],
+            "peak_hip": knee_hip_series[peak_idx, 1],
+            "trunk_lean_at_peak": trunk_lean_series[peak_idx],
+            "valgus_at_peak": valgus_series[peak_idx],
+            "max_trunk_lean": trunk_lean_series.max(),
         })
+
     return pd.DataFrame.from_records(records)
 
 
