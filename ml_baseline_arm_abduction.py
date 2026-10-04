@@ -62,6 +62,9 @@ def main():
 
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
+    print("Feature correlation matrix:")
+    print(arm_df[FEATURE_COLS].corr().round(2))
+    print()
 
     models = {
         "logistic_regression": LogisticRegression(max_iter=1000),
@@ -94,6 +97,25 @@ def main():
         print(f"  {name:20s} {imp:.3f}")
 
     results_df.to_csv("/kaggle/working/arm_abduction_ml_baseline_results.csv", index=False)
+        print("\n" + "=" * 72)
+    print("REDUCED FEATURE SET (dropping mean_trunk_lean — collinear with max_trunk_lean)")
+    print("=" * 72)
+    reduced_cols = [c for c in FEATURE_COLS if c != "mean_trunk_lean"]
+    X_reduced = scaler.fit_transform(arm_df[reduced_cols].values)
+    reduced_results = [
+        evaluate_model(f"{n}_reduced", m, X_reduced, y, groups, n_splits)
+        for n, m in {
+            "logistic_regression": LogisticRegression(max_iter=1000),
+            "random_forest": RandomForestClassifier(n_estimators=200, max_depth=4, random_state=42),
+        }.items()
+    ]
+    reduced_df = pd.DataFrame(reduced_results).sort_values("f1", ascending=False).reset_index(drop=True)
+    print(reduced_df.to_string(index=False, float_format=lambda v: f"{v:.3f}"))
+
+    lr_reduced = LogisticRegression(max_iter=1000).fit(X_reduced, y)
+    print("\nLR coefficients WITHOUT mean_trunk_lean:")
+    for name, coef in sorted(zip(reduced_cols, lr_reduced.coef_[0]), key=lambda t: -abs(t[1])):
+        print(f"  {name:20s} {coef:+.3f}")
     print("\nSaved results to /kaggle/working/arm_abduction_ml_baseline_results.csv")
 
 
