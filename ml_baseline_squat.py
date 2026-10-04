@@ -44,8 +44,6 @@ def main():
     print(f"Loaded {len(squat_df)} reps across {n_subjects} subjects "
           f"({n_correct} correct / {n_incorrect} incorrect). GroupKFold(n_splits={n_splits}).\n")
 
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
 
     print("Feature correlation matrix:")
     print(squat_df[FEATURE_COLS].corr().round(2))
@@ -55,7 +53,8 @@ def main():
         "logistic_regression": LogisticRegression(max_iter=1000),
         "random_forest": RandomForestClassifier(n_estimators=200, max_depth=4, random_state=42),
     }
-    results = [evaluate_model(name, model, X_scaled, y, groups, n_splits) for name, model in models.items()]
+    # X is RAW here — evaluate_model scales internally, per fold, no leakage.
+    results = [evaluate_model(name, model, X, y, groups, n_splits) for name, model in models.items()]
     results_df = pd.DataFrame(results).sort_values("roc_auc", ascending=False).reset_index(drop=True)
 
     print("=" * 72)
@@ -90,6 +89,8 @@ def main():
     print("INTERPRETABILITY (fit on full data, not the CV estimate)")
     print("=" * 72)
 
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)  # full-data fit for interpretability only — no held-out evaluation here, so no leakage concern
     lr_full = LogisticRegression(max_iter=1000).fit(X_scaled, y)
     print("\nLogistic regression coefficients (standardized features):")
     for name, coef in sorted(zip(FEATURE_COLS, lr_full.coef_[0]), key=lambda t: -abs(t[1])):
