@@ -97,7 +97,7 @@ def main():
         print(f"  {name:20s} {imp:.3f}")
 
     results_df.to_csv("/kaggle/working/arm_abduction_ml_baseline_results.csv", index=False)
-        print("\n" + "=" * 72)
+    print("\n" + "=" * 72)
     print("REDUCED FEATURE SET (dropping mean_trunk_lean — collinear with max_trunk_lean)")
     print("=" * 72)
     reduced_cols = [c for c in FEATURE_COLS if c != "mean_trunk_lean"]
