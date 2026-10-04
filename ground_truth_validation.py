@@ -83,29 +83,19 @@ def squat_angles(p):
     return knee, hip
 
 
-def arm_elevation_candidates(p):
-    """
-    Six candidate definitions of 'arm elevation', all as the angle at the
-    shoulder between some trunk-side reference and the upper-arm vector
-    (shoulder_right -> elbow_right). Returns a dict so all can be compared
-    against the same reps at once.
-    """
-    sh, el = p["shoulder_right"], p["elbow_right"]
-    trunk_dir = p["neck"] - p["pelvis_center"]  # whole-trunk axis, midline-ish
-    world_up = np.array([0.0, 1.0, 0.0])        # y confirmed vertical in this dataset
-
-    return {
-        "pelvis_ref": joint_angle(p["pelvis_center"], sh, el),           # original/baseline
-        "neck_ref": joint_angle(p["neck"], sh, el),
-        "spine1_ref": joint_angle(p["spine1"], sh, el),
-        "shoulder_center_ref": joint_angle(p["shoulder_center"], sh, el),
-        "trunk_vector_ref": joint_angle(sh + trunk_dir, sh, el),         # neck-pelvis direction, anchored at shoulder
-        "world_vertical_ref": joint_angle(sh + world_up, sh, el),        # fixed vertical, trunk-lean-proof
-    }
+def elevation_angle(p):
+    """pelvis_ref — frozen as the baseline definition. No further elevation experiments."""
+    return joint_angle(p["pelvis_center"], p["shoulder_right"], p["elbow_right"])
 
 
 def elbow_angle(p):
     return joint_angle(p["shoulder_right"], p["elbow_right"], p["wrist_right"])
+
+
+def trunk_lean_angle(p):
+    """Angle between trunk vector (neck - pelvis_center) and world vertical."""
+    world_up = np.array([0.0, 1.0, 0.0])
+    return joint_angle(p["pelvis_center"] + world_up, p["pelvis_center"], p["neck"])
 
 
 def read_segmentation(path):
@@ -131,7 +121,7 @@ def analyze_squat(seg):
             continue
         segment = arr[first:last + 1]
         series = np.array([squat_angles(get_virtual_points(source_type, segment[t])) for t in range(segment.shape[0])])
-        peak_idx = series[:, 0].argmin()  # deepest knee bend
+        peak_idx = series[:, 0].argmin()
         records.append({
             "video_id": row["video_id"], "correctness": int(row["correctness"]),
             "peak_knee": series[peak_idx, 0], "peak_hip": series[peak_idx, 1],
@@ -139,10 +129,13 @@ def analyze_squat(seg):
     return pd.DataFrame.from_records(records)
 
 
-def analyze_arm_abduction_candidates(seg):
+def analyze_arm_abduction_final(seg):
+    """
+    Final feature-validation pass for Ex1. Tests elbow flexion, trunk
+    compensation, and ROM as alternatives to peak elevation (frozen,
+    kept only as a baseline reference column).
+    """
     rows = seg[(seg["exercise_id"] == EX_ARM_ABDUCTION) & (seg["mocap_erroneous"] == 0)]
-    candidate_names = ["pelvis_ref", "neck_ref", "spine1_ref", "shoulder_center_ref",
-                        "trunk_vector_ref", "world_vertical_ref"]
     records = []
     for _, row in rows.iterrows():
         try:
@@ -155,28 +148,45 @@ def analyze_arm_abduction_candidates(seg):
             continue
         segment = arr[first:last + 1]
 
-        series = {name: [] for name in candidate_names}
-        elbow_series = []
+        elevation_series, elbow_series, trunk_lean_series = [], [], []
         for t in range(segment.shape[0]):
             pts = get_virtual_points(source_type, segment[t])
-            cands = arm_elevation_candidates(pts)
-            for name in candidate_names:
-                series[name].append(cands[name])
+            elevation_series.append(elevation_angle(pts))
             elbow_series.append(elbow_angle(pts))
+            trunk_lean_series.append(trunk_lean_angle(pts))
 
-        rec = {"video_id": row["video_id"], "correctness": int(row["correctness"])}
-        for name in candidate_names:
-            arr_s = np.array(series[name])
-            rec[f"peak_{name}"] = arr_s.max()  # each definition peaks on its own terms
-        rec["elbow_at_overall_peak"] = np.array(elbow_series)[np.array(series["pelvis_ref"]).argmax()]
-        records.append(rec)
-    return pd.DataFrame.from_records(records), candidate_names
+        elevation_series = np.array(elevation_series)
+        elbow_series = np.array(elbow_series)
+        trunk_lean_series = np.array(trunk_lean_series)
+
+        records.append({
+            "video_id": row["video_id"],
+            "repetition_number": row["repetition_number"],
+            "correctness": int(row["correctness"]),
+            "peak_elevation": elevation_series.max(),
+            "peak_elbow": elbow_series.max(),
+            "max_trunk_lean": trunk_lean_series.max(),
+            "mean_trunk_lean": trunk_lean_series.mean(),
+            "elevation_rom": elevation_series.max() - elevation_series.min(),
+        })
+    return pd.DataFrame.from_records(records)
 
 
 def cohens_d(a, b):
     n1, n0 = len(a), len(b)
     pooled_std = np.sqrt(((n1 - 1) * a.std() ** 2 + (n0 - 1) * b.std() ** 2) / (n1 + n0 - 2))
     return (a.mean() - b.mean()) / pooled_std if pooled_std > 0 else 0.0
+
+
+def interpret_d(d):
+    ad = abs(d)
+    if ad < 0.20:
+        return "Negligible"
+    if ad < 0.50:
+        return "Small"
+    if ad < 0.80:
+        return "Medium"
+    return "Large"
 
 
 def summarize_simple(df, col, lo, hi):
@@ -188,39 +198,40 @@ def summarize_simple(df, col, lo, hi):
         print(f"  {name:9s} (n={len(subset):3d}): mean={subset.mean():6.1f}  std={subset.std():5.1f}  in-target[{lo}-{hi}]={in_range:5.1f}%")
 
 
-def compare_candidates(df, candidate_names):
+def compare_features(df, feature_names):
     results = []
-    for name in candidate_names:
-        col = f"peak_{name}"
-        correct = df[df["correctness"] == 1][col]
-        incorrect = df[df["correctness"] == 0][col]
+    for name in feature_names:
+        correct = df[df["correctness"] == 1][name]
+        incorrect = df[df["correctness"] == 0][name]
         d = cohens_d(correct, incorrect)
         results.append((name, d, correct.mean(), incorrect.mean()))
     results.sort(key=lambda r: -abs(r[1]))
 
-    print(f"{'definition':20s} {'cohens_d':>9s} {'correct_mean':>13s} {'incorrect_mean':>15s}")
+    print(f"{'Feature':20s} {'Cohen_d':>9s} {'CorrectMean':>13s} {'IncorrectMean':>15s} {'Effect':>11s}")
+    print("-" * 72)
     for name, d, cm, im in results:
         flag = "  <-- best separation" if name == results[0][0] else ""
-        print(f"{name:20s} {d:9.2f} {cm:13.1f} {im:15.1f}{flag}")
+        print(f"{name:20s} {d:9.2f} {cm:13.2f} {im:15.2f} {interpret_d(d):>11s}{flag}")
     return results
 
 
 if __name__ == "__main__":
     seg = read_segmentation(SEGMENTATION_CSV)
 
-    print("=" * 70); print("SQUAT (Ex6) — unchanged from before"); print("=" * 70)
+    print("=" * 72); print("SQUAT (Ex6) — unchanged from before"); print("=" * 72)
     squat_df = analyze_squat(seg)
     print(f"Loaded {len(squat_df)} reps.")
     print("\nKnee (at deepest point):"); summarize_simple(squat_df, "peak_knee", 70, 100)
     print("\nHip (at deepest point):"); summarize_simple(squat_df, "peak_hip", 60, 120)
-
-    print(); print("=" * 70)
-    print("ARM ABDUCTION (Ex1) — comparing 6 elevation definitions by effect size")
-    print("=" * 70)
-    arm_df, candidate_names = analyze_arm_abduction_candidates(seg)
-    print(f"Loaded {len(arm_df)} reps.\n")
-    compare_candidates(arm_df, candidate_names)
-
     squat_df.to_csv("/kaggle/working/squat_ground_truth_angles.csv", index=False)
-    arm_df.to_csv("/kaggle/working/arm_abduction_candidate_angles.csv", index=False)
-    print("\nSaved CSVs to /kaggle/working/")
+
+    print(); print("=" * 72)
+    print("ARM ABDUCTION (Ex1) — FINAL feature validation (elbow / trunk lean / ROM)")
+    print("=" * 72)
+    arm_df = analyze_arm_abduction_final(seg)
+    print(f"Loaded {len(arm_df)} reps.\n")
+    feature_names = ["peak_elevation", "peak_elbow", "max_trunk_lean", "mean_trunk_lean", "elevation_rom"]
+    compare_features(arm_df, feature_names)
+    arm_df.to_csv("/kaggle/working/arm_abduction_final_validation.csv", index=False)
+
+    print("\nSaved CSVs to /kaggle/working/ ")
