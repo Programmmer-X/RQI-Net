@@ -234,4 +234,4 @@ if __name__ == "__main__":
     compare_features(arm_df, feature_names)
     arm_df.to_csv("/kaggle/working/arm_abduction_final_validation.csv", index=False)
 
-    print("\nSaved CSVs to /kaggle/working/ ")
+    print("\nSaved CSVs to /kaggle/working/")
