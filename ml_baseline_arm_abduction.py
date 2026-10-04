@@ -1,0 +1,101 @@
+"""
+ml_baseline_arm_abduction.py
+
+Classical ML baseline for Ex1 (Arm Abduction) correctness classification.
+
+Why a model instead of a threshold: univariate testing (ground_truth_validation.py)
+found every individual feature negligible (|d| < 0.20) because REHAB24-6
+deliberately gives each incorrect rep a DIFFERENT predefined error type
+(per the dataset paper — errors are varied per subject, not a single
+consistent mistake). No single feature should be expected to separate
+correct/incorrect cleanly; a model combining all 5 features can still
+work if each feature catches a different error mode.
+
+Compares logistic regression (interpretable, gives coefficients) against
+random forest (likely higher ceiling, less interpretable), using
+GroupKFold on video_id so no subject's reps leak across train/test folds
+— with only 13 subjects for Ex1, this matters a lot more than usual.
+"""
+
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GroupKFold, cross_val_predict
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
+from sklearn.preprocessing import StandardScaler
+
+sys.path.insert(0, str(Path(__file__).parent))
+from ground_truth_validation import SEGMENTATION_CSV, analyze_arm_abduction_final, read_segmentation
+
+FEATURE_COLS = ["peak_elevation", "peak_elbow", "max_trunk_lean", "mean_trunk_lean", "elevation_rom"]
+
+
+def evaluate_model(name, model, X, y, groups, n_splits):
+    gkf = GroupKFold(n_splits=n_splits)
+    y_pred = cross_val_predict(model, X, y, cv=gkf, groups=groups, method="predict")
+    y_proba = cross_val_predict(model, X, y, cv=gkf, groups=groups, method="predict_proba")[:, 1]
+    return {
+        "model": name,
+        "accuracy": accuracy_score(y, y_pred),
+        "precision": precision_score(y, y_pred),
+        "recall": recall_score(y, y_pred),
+        "f1": f1_score(y, y_pred),
+        "roc_auc": roc_auc_score(y, y_proba),
+    }
+
+
+def main():
+    seg = read_segmentation(SEGMENTATION_CSV)
+    arm_df = analyze_arm_abduction_final(seg)
+
+    X = arm_df[FEATURE_COLS].values
+    y = arm_df["correctness"].values
+    groups = arm_df["video_id"].values
+
+    n_subjects = len(set(groups))
+    n_splits = min(5, n_subjects)
+    print(f"Loaded {len(arm_df)} reps across {n_subjects} subjects. GroupKFold(n_splits={n_splits}), grouped by video_id.\n")
+
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    models = {
+        "logistic_regression": LogisticRegression(max_iter=1000),
+        "random_forest": RandomForestClassifier(n_estimators=200, max_depth=4, random_state=42),
+    }
+
+    results = [evaluate_model(name, model, X_scaled, y, groups, n_splits) for name, model in models.items()]
+    results_df = pd.DataFrame(results).sort_values("f1", ascending=False).reset_index(drop=True)
+
+    print("=" * 72)
+    print("CROSS-VALIDATED COMPARISON (out-of-fold, grouped by subject)")
+    print("=" * 72)
+    print(results_df.to_string(index=False, float_format=lambda v: f"{v:.3f}"))
+    winner = results_df.iloc[0]["model"]
+    print(f"\nWinner (by F1): {winner}")
+
+    # Fit on full data for interpretability — separate from the CV evaluation above.
+    print("\n" + "=" * 72)
+    print("INTERPRETABILITY (fit on full data, not the CV estimate)")
+    print("=" * 72)
+
+    lr_full = LogisticRegression(max_iter=1000).fit(X_scaled, y)
+    print("\nLogistic regression coefficients (standardized features — magnitude = importance):")
+    for name, coef in sorted(zip(FEATURE_COLS, lr_full.coef_[0]), key=lambda t: -abs(t[1])):
+        print(f"  {name:20s} {coef:+.3f}")
+
+    rf_full = RandomForestClassifier(n_estimators=200, max_depth=4, random_state=42).fit(X_scaled, y)
+    print("\nRandom forest feature importances:")
+    for name, imp in sorted(zip(FEATURE_COLS, rf_full.feature_importances_), key=lambda t: -t[1]):
+        print(f"  {name:20s} {imp:.3f}")
+
+    results_df.to_csv("/kaggle/working/arm_abduction_ml_baseline_results.csv", index=False)
+    print("\nSaved results to /kaggle/working/arm_abduction_ml_baseline_results.csv")
+
+
+if __name__ == "__main__":
+    main()
