@@ -1,11 +1,9 @@
 """
-personal_calibration_squat.py
+personal_calibration_arm_abduction.py
 
-Leave-one-rep-out nearest-centroid classification WITHIN subject (personal
-calibration), corrected for scaler leakage: StandardScaler is fit fresh,
-per held-out rep, using only that rep's "others" (same-subject + other
-subjects' reps, excluding the rep being classified). No statistic used to
-classify rep i is computed using rep i itself.
+Same protocol as personal_calibration_squat.py, applied to Ex1 (Arm
+Abduction) using FEATURE_COLS from ml_baseline_arm_abduction.py. Built
+leak-free from the start (scaler fit fresh per held-out rep).
 """
 import sys
 from pathlib import Path
@@ -15,8 +13,8 @@ from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_sc
 from sklearn.preprocessing import StandardScaler
 
 sys.path.insert(0, str(Path(__file__).parent))
-from ground_truth_validation import SEGMENTATION_CSV, analyze_squat, read_segmentation
-from ml_baseline_squat import FEATURE_COLS
+from ground_truth_validation import SEGMENTATION_CSV, analyze_arm_abduction_final, read_segmentation
+from ml_baseline_arm_abduction import FEATURE_COLS
 
 
 def leave_one_out_personal_centroid(df, feature_cols):
@@ -28,7 +26,7 @@ def leave_one_out_personal_centroid(df, feature_cols):
     preds, scores = [], []
     fallback_count = 0
     for i in range(len(df)):
-        train_mask = idx != i  # everyone except rep i — ALL stats below use only this
+        train_mask = idx != i
         scaler = StandardScaler().fit(X_raw[train_mask])
         X_train = scaler.transform(X_raw[train_mask])
         x_i = scaler.transform(X_raw[i : i + 1])[0]
@@ -58,9 +56,9 @@ def leave_one_out_personal_centroid(df, feature_cols):
 
 def main():
     seg = read_segmentation(SEGMENTATION_CSV)
-    squat_df = analyze_squat(seg)
+    arm_df = analyze_arm_abduction_final(seg)
 
-    preds, scores, y, fallback_count = leave_one_out_personal_centroid(squat_df, FEATURE_COLS)
+    preds, scores, y, fallback_count = leave_one_out_personal_centroid(arm_df, FEATURE_COLS)
 
     acc = accuracy_score(y, preds)
     prec = precision_score(y, preds)
@@ -68,7 +66,7 @@ def main():
     f1 = f1_score(y, preds)
     auc = roc_auc_score(y, scores)
 
-    print(f"Loaded {len(squat_df)} reps. {fallback_count} needed a global-centroid fallback "
+    print(f"Loaded {len(arm_df)} reps. {fallback_count} needed a global-centroid fallback "
           f"(subject had 0 remaining reps of one class after leave-one-out).\n")
     print("=" * 72)
     print("PER-PATIENT CALIBRATION (leave-one-rep-out nearest centroid, within subject)")
