@@ -14,6 +14,7 @@ than for Ex1's balanced 90/88 split.
 """
 import sys
 from pathlib import Path
+import numpy as np
 
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
@@ -24,7 +25,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from ground_truth_validation import SEGMENTATION_CSV, analyze_squat, read_segmentation
 from ml_utils import evaluate_model
 
-FEATURE_COLS = ["peak_knee", "peak_hip", "trunk_lean_at_peak", "valgus_at_peak", "max_trunk_lean"]
+FEATURE_COLS = ["peak_knee", "peak_hip", "trunk_lean_at_peak", "max_trunk_lean"]
+# valgus_at_peak dropped — r=0.98 with peak_knee, the x,y projection still
+# carries the same depth signal (y dominates both), not independent info
 
 
 def main():
@@ -60,6 +63,28 @@ def main():
     print("=" * 72)
     print(results_df.to_string(index=False, float_format=lambda v: f"{v:.3f}"))
     print(f"\nWinner (by ROC-AUC — F1 is unreliable here under 68/32 class imbalance): {results_df.iloc[0]['model']}")
+
+    # Final check before accepting these results: per-subject z-score each
+    # feature. Tests whether the weak signal above is masked by between-
+    # subject variance (2/9 subjects showed reversed correctness direction
+    # earlier) rather than genuinely absent. Uses only each subject's own
+    # feature mean/std — no label information, so no leakage.
+    normalized_df = squat_df.copy()
+    for col in FEATURE_COLS:
+        normalized_df[col] = squat_df.groupby("video_id")[col].transform(
+            lambda s: (s - s.mean()) / s.std() if s.std() > 0 else 0.0
+        )
+    X_norm = np.nan_to_num(normalized_df[FEATURE_COLS].values, nan=0.0)
+
+    norm_results = [
+        evaluate_model(f"{name}_subject_normalized", model, X_norm, y, groups, n_splits)
+        for name, model in models.items()
+    ]
+    norm_df = pd.DataFrame(norm_results).sort_values("roc_auc", ascending=False).reset_index(drop=True)
+    print("\n" + "=" * 72)
+    print("PER-SUBJECT NORMALIZED FEATURES (z-scored within each subject)")
+    print("=" * 72)
+    print(norm_df.to_string(index=False, float_format=lambda v: f"{v:.3f}"))
 
     print("\n" + "=" * 72)
     print("INTERPRETABILITY (fit on full data, not the CV estimate)")
